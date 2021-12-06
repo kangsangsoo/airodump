@@ -1,5 +1,0 @@
-sudo ifconfig wlx705dccfb7b29 down
-sudo ip link set wlx705dccfb7b29 name mon0
-sudo iwconfig mon0 mode monitor
-sudo ifconfig mon0 upd
-iwconfig
