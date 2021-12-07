@@ -2,7 +2,7 @@
 #include "mac.h"
 
 
-#define BEACON 0
+#define BEACON 8
 #define DATA 2 
 
 #pragma pack(push,1)
@@ -29,8 +29,21 @@ struct beacon_frame{
 	uint64_t timestamp_;
 	uint16_t interval_;
 	uint16_t ci_;
+};
+#pragma pack(pop)
 
-	
+#pragma pack(push,1)
+struct probe_frame{
+	uint8_t version_:2;
+	uint8_t type_:2;
+	uint8_t subtype_:4;
+	uint8_t flag_;
+	uint16_t duration_;
+	Mac da_;
+	Mac sa_;
+	Mac bssid_;
+	uint16_t seq_;
+
 };
 #pragma pack(pop)
 
