@@ -1,92 +1,88 @@
 #include <pcap.h>
 #include <iostream>
 #include <cstdio>
-#include "hd.h"
+#include "802-11.h"
 #include <map>
 #include <thread>
-#include <mutex>
 #include <time.h>
 #include <unistd.h>
+#include <vector>
+#include <regex>
 
 using namespace std;
 
-mutex ch_mutex;
+#define BEACON 8
+#define PROBE_REQEUST 4
+#define MANAGEMENT_FRAME 0
+#define SSID 0
 
-int channel = 1;
-// 1~13 1초 간격
-void channel_hopping_thread(char* dev) {
-	unsigned char i = 0;
-	
-	while(1) {
-		string s;
-		s += "iwconfig ";
-		s += dev;
-		s += " channel ";
-		s += to_string(channel);
-		
-		channel = (i++ % 13) + 1;
-		system(s.c_str());
-
-		
-		std::this_thread::sleep_for( std::chrono::milliseconds(1000) ) ;
-		// sleep(10);
-	}
-}
-
+int channel;
 map <Mac, int> beacon_count;
 map <Mac, string> essid;
 map <string, Mac> essid_rev;
 map <pair<Mac, Mac>, string> ap;
 
-
 void usage(void) {
-	cout << "syntax : airodump <interface>" << endl;
-	cout << "sample : airodump mon0" << endl;
+	cout << "syntax : airodump <interface>" << '\n';
+	cout << "sample : airodump mon0" << '\n';
 }
 
 void print(void) {
-	printf("\x1b[H\x1b[J");
-
-	printf("channel: %d\n", channel);
-	printf("bssid\t\t\tbeacon\t\tessid\n\n");
+	system("clear");
+	printf("CHANNEL: %d\n", channel);
+	cout << "BSSID\t\t\tBEACON\t\tESSID\n\n";
 	for(auto it = beacon_count.begin(); it != beacon_count.end(); it++) {
-		// printf("%s\t%d\t%s\n", string(it->first).c_str(), it->second, essid[it->first].c_str());
-		cout << string(it->first) << '\t' << it->second << "\t\t" << essid[it->first] << '\t' << endl;
+		cout << string(it->first) << '\t' << it->second << "\t\t" << essid[it->first] << '\t' << '\n';
 	}
-	printf("\nbssid\t\t\tap\t\t\t\tprobe\n\n");
+	cout << "\nBSSID\t\t\tAP\t\t\t\tPROBE\n\n";
 	for(auto it = ap.begin(); it != ap.end(); it++) {
-		// printf("%s\t%d\t%s\n", string(it->first).c_str(), it->second, essid[it->first].c_str());
-		if(it->first.first == Mac::broadcastMac()) cout << "not associated"<< "\t\t" << string(it->first.second) << "\t\t" << it->second << '\t' << endl;
-		else cout << string(it->first.first) << '\t' << string(it->first.second) << "\t\t" << it->second << '\t' << endl;
+		if(it->first.first == Mac::broadcastMac()) cout << "(not associated)"<< "\t" << string(it->first.second) << "\t\t" << it->second << '\t' << '\n';
+		else cout << string(it->first.first) << '\t' << string(it->first.second) << "\t\t" << it->second << '\t' << '\n';
 	}
 }
 
+void channel_hopping_thread(char* dev) {
+	string a = string("iwlist ") + string(dev) + string(" channel");
 
-#define ESSID 0
-string null_string;
-string find_essid(const u_char* tag_start, int tag_total_len) {
-	// tag_number + tag_length + tag_content
+	/* wanochoi.com/?p=178 */
+	FILE* stream = popen(a.c_str(), "r" ); 
+	ostringstream output;
+	 while( !feof(stream) && !ferror(stream) )
+	{
+		char buf[128];
+		int bytesRead = fread( buf, 1, 128, stream );
+		output.write( buf, bytesRead );
+	}
+	pclose(stream);
+	string result = output.str();
+	/**/
 
-	int i = 0;
-	while(i < tag_total_len-4) {
-		uint8_t tag_number = tag_start[i++];
-		uint8_t tag_length = tag_start[i++];
+	vector <string> ch_list;
+	regex re("Channel [\\d]+ ");
 
-		if(tag_number == ESSID) {
-			// i ~ i + tag_length
-			string str;
-			int limit = i + tag_length;
-			// essid가 다 \0인 경우는?
-			for(;i < limit; i++) {
-				str.push_back(tag_start[i]);
-			}
-			cout << str << endl;
-			return str;
-		}  
-		i = i + tag_length;
+	auto it = sregex_iterator(result.begin(), result.end(), re);
+	for(;it != sregex_iterator(); it++) {
+		ch_list.push_back(it->str().substr(8, it->str().length() - 9));
 	}
 
-	return null_string;
+	while(1) {
+		for(auto i : ch_list) {
+			channel = atoi(i.c_str());
+			string s = string("iwconfig ") + string(dev) + string(" channel ") + i;
+			system(s.c_str());
+			std::this_thread::sleep_for( std::chrono::milliseconds(500) ) ;
+		}
+	}
+}
+
+string find_essid(const u_char* tag_start, int tag_total_len) {
+	tagged_parameter* tag = (tagged_parameter*)tag_start;
+
+	if(tag->id_ != SSID) return string("");
+	
+	string s;
+	for(int i = 0; i < tag->len_; i++) s.push_back(tag_start[2+i]);
+	return s;
 }
 
 int main(int argc, char* argv[]) {
@@ -110,7 +106,6 @@ int main(int argc, char* argv[]) {
 
 	while(1) {
 		int res = pcap_next_ex(handle, &pkheader, &packet); 
-
 		if(res == 0) continue;
 		if(res == PCAP_ERROR || res == PCAP_ERROR_BREAK) {
 			fprintf(stderr, "pcap_next_ex return %d(%s)\n", res, pcap_geterr(handle));
@@ -120,21 +115,26 @@ int main(int argc, char* argv[]) {
 		radiotap_header* rh = (radiotap_header*)packet;
 		beacon_frame* bf = (beacon_frame*)(packet + (rh->len_));
 		probe_frame* pf = (probe_frame*)(packet + (rh->len_));
-		if(pf->version_ == 0 && pf->type_ == 0 && pf->subtype_ == 4) {
-			auto tmp = find_essid(packet + (rh->len_) + sizeof(probe_frame), pkheader->len - (rh->len_) - sizeof(probe_frame));
-			// cout << tmp << endl;
-			if(essid_rev.find(tmp) == essid_rev.end()) ap.insert({{Mac::broadcastMac(), pf->sa_}, tmp});
-			else ap.insert({{essid_rev[tmp], bf->sa_}, tmp});
+
+		// probe request
+		if(pf->type_ == MANAGEMENT_FRAME && pf->subtype_ == PROBE_REQEUST) {
+			auto str = find_essid(packet + (rh->len_) + sizeof(probe_frame), pkheader->len - (rh->len_) - sizeof(probe_frame));
+			if(essid_rev.find(str) == essid_rev.end()) ap.insert({{Mac::broadcastMac(), pf->sa_}, str});
+			else ap.insert({{essid_rev[str], bf->sa_}, str});
 		}
 
-		if(bf->version_ != 0 || bf->type_ != 0 || bf->subtype_ != BEACON) continue;
-		beacon_count[bf->bssid_]++;
-		if(essid.find(bf->bssid_) == essid.end()) {
-			essid[bf->bssid_] = find_essid(packet + (rh->len_) + sizeof(beacon_frame), pkheader->len - (rh->len_) - sizeof(beacon_frame)); 
-			essid_rev[essid[bf->bssid_]] = bf->bssid_;
-			// cout << string(bf->bssid_) << endl;
+		// beacon frame
+		else if(bf->type_ == MANAGEMENT_FRAME && bf->subtype_ == BEACON) {
+			beacon_count[bf->bssid_]++;
+			if(essid.find(bf->bssid_) == essid.end()) {
+				essid[bf->bssid_] = find_essid(packet + (rh->len_) + sizeof(beacon_frame), pkheader->len - (rh->len_) - sizeof(beacon_frame)); 
+				essid_rev[essid[bf->bssid_]] = bf->bssid_;
+			}
 		}
+
 		print();
 	}
-	
+
+	pcap_close(handle);
+	return 0;
 }
