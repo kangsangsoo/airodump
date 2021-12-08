@@ -34,7 +34,7 @@ void print(void) {
 	for(auto it = beacon_count.begin(); it != beacon_count.end(); it++) {
 		cout << string(it->first) << '\t' << it->second << "\t\t" << essid[it->first] << '\t' << '\n';
 	}
-	cout << "\nBSSID\t\t\tAP\t\t\t\tPROBE\n\n";
+	cout << "\nBSSID\t\t\tSTATION\t\t\t\tPROBE\n\n";
 	for(auto it = ap.begin(); it != ap.end(); it++) {
 		if(it->first.first == Mac::broadcastMac()) cout << "(not associated)"<< "\t" << string(it->first.second) << "\t\t" << it->second << '\t' << '\n';
 		else cout << string(it->first.first) << '\t' << string(it->first.second) << "\t\t" << it->second << '\t' << '\n';
