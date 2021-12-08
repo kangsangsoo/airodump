@@ -78,7 +78,7 @@ void channel_hopping_thread(char* dev) {
 string find_essid(const u_char* tag_start, int tag_total_len) {
 	tagged_parameter* tag = (tagged_parameter*)tag_start;
 
-	if(tag->id_ != SSID) return string("");
+	if(tag_total_len < 2 ||tag->id_ != SSID || tag->len_ + 2 > tag_total_len) return string("");
 	
 	string s;
 	for(int i = 0; i < tag->len_; i++) s.push_back(tag_start[2+i]);
@@ -116,18 +116,22 @@ int main(int argc, char* argv[]) {
 		beacon_frame* bf = (beacon_frame*)(packet + (rh->len_));
 		probe_frame* pf = (probe_frame*)(packet + (rh->len_));
 
+		if(rh->len_ > pkheader->len) continue; 
 		// probe request
-		if(pf->type_ == MANAGEMENT_FRAME && pf->subtype_ == PROBE_REQEUST) {
-			auto str = find_essid(packet + (rh->len_) + sizeof(probe_frame), pkheader->len - (rh->len_) - sizeof(probe_frame));
+		int pf_len = rh->len_ + sizeof(probe_frame);
+		if(pf_len <= pkheader->len && pf->type_ == MANAGEMENT_FRAME && pf->subtype_ == PROBE_REQEUST) {
+			auto str = find_essid(packet + pf_len, pkheader->len - pf_len);
 			if(essid_rev.find(str) == essid_rev.end()) ap.insert({{Mac::broadcastMac(), pf->sa_}, str});
 			else ap.insert({{essid_rev[str], bf->sa_}, str});
 		}
+		
 
 		// beacon frame
-		else if(bf->type_ == MANAGEMENT_FRAME && bf->subtype_ == BEACON) {
+		int bf_len = rh->len_ + sizeof(beacon_frame); 
+		if(bf_len <= pkheader->len && bf->type_ == MANAGEMENT_FRAME && bf->subtype_ == BEACON) {
 			beacon_count[bf->bssid_]++;
 			if(essid.find(bf->bssid_) == essid.end()) {
-				essid[bf->bssid_] = find_essid(packet + (rh->len_) + sizeof(beacon_frame), pkheader->len - (rh->len_) - sizeof(beacon_frame)); 
+				essid[bf->bssid_] = find_essid(packet + bf_len, pkheader->len - bf_len); 
 				essid_rev[essid[bf->bssid_]] = bf->bssid_;
 			}
 		}
